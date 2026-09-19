@@ -1,0 +1,85 @@
+name: ohtli-observability
+
+# README.md section 8's MVP stack. The controller (../controller) is NOT
+# part of this compose file -- it runs as a native process on the lab
+# host per README.md section 2's architecture; Prometheus reaches it via
+# host.docker.internal (see the extra_hosts entry below and
+# prometheus/prometheus.yml).
+#
+# None of this has been started against a live Docker daemon in the
+# environment this was authored in (no privileged Docker access there);
+# see observability/README.md for what was validated instead.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.2.1
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./otel/otel-collector-config.yml:/etc/otel-collector-config.yml:ro
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+      - "8888:8888"  # collector self-telemetry
+      - "8889:8889"  # forwarded metrics (Prometheus exporter)
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+    secrets:
+      - grafana_admin_password
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+secrets:
+  grafana_admin_password:
+    file: ./grafana_admin_password.txt
+
+volumes:
+  prometheus-data:
+  loki-data:
+  grafana-data:

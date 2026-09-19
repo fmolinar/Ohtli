@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: controller
+    metrics_path: /metrics
+    static_configs:
+      # The controller (cmd/controller) runs as a native process on the
+      # lab host per README.md section 2's architecture, not inside this
+      # compose stack -- host-gateway (see docker-compose.yml's
+      # extra_hosts) resolves this to the Docker host.
+      - targets: ["host.docker.internal:9400"]
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8888"]  # collector self-telemetry
+
+  - job_name: otel-collector-forwarded
+    static_configs:
+      - targets: ["otel-collector:8889"]  # metrics forwarded in over OTLP
