@@ -1,0 +1,201 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CONTAINERLAB_VERSION: "0.58.0"
+  CLAB_LAB_NAME: isp-lab
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: controller/go.mod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Install lint tooling
+        run: |
+          pip install --quiet ansible-lint yamllint
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: yamllint
+        run: |
+          yamllint -d "{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable, comments-indentation: disable}}" \
+            topology/ ansible/ observability/ .github/
+
+      - name: ansible-lint
+        working-directory: ansible
+        run: |
+          ansible-galaxy collection install -r requirements.yml
+          ansible-lint
+
+      - name: shellcheck
+        run: shellcheck traffic/iperf/*.sh
+
+      - name: Go build, vet, test
+        working-directory: controller
+        run: |
+          go build ./...
+          go vet ./...
+          test -z "$(gofmt -l .)"
+          go test ./... -race
+
+      - name: Terraform fmt and validate
+        working-directory: terraform/environments/lab
+        run: |
+          terraform fmt -check -recursive ../../
+          terraform init -backend=false
+          terraform validate
+
+      - name: Validate docker-compose config
+        working-directory: observability
+        run: docker compose config >/dev/null
+
+  lab-e2e:
+    name: lab-e2e
+    needs: validate
+    runs-on: ubuntu-latest
+    # Everything below runs in ONE job (not README.md section 10's separate
+    # topology-deploy/ansible-baseline/controller-smoke/traffic-baseline/
+    # failure-test/restore-and-verify/cleanup jobs) because GitHub-hosted
+    # runners don't share a filesystem or Docker state between jobs --
+    # splitting this across jobs would mean each one starts from an empty
+    # runner with no deployed topology. A single job with sequential steps
+    # (and an always()-guarded cleanup step) gets the same coverage.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: controller/go.mod
+
+      - name: Install Containerlab
+        run: |
+          curl -sL https://get.containerlab.dev | sudo bash -s -- -v "${CONTAINERLAB_VERSION}"
+
+      - name: Deploy topology
+        run: sudo containerlab deploy --topo topology/isp.clab.yml
+
+      - name: Wait for OSPF/BGP convergence
+        run: |
+          for _ in $(seq 1 30); do
+            up=$(sudo docker exec "clab-${CLAB_LAB_NAME}-pe1" vtysh -c "show ip bgp summary json" \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for p in d.get('ipv4Unicast',{}).get('peers',{}).values() if p.get('state')=='Established'))" 2>/dev/null || echo 0)
+            echo "pe1 established BGP peers: ${up}/3"
+            [ "${up}" = "3" ] && exit 0
+            sleep 5
+          done
+          echo "::error::BGP did not converge in time"
+          sudo docker exec "clab-${CLAB_LAB_NAME}-pe1" vtysh -c "show ip bgp summary"
+          exit 1
+
+      - name: Ansible baseline (render + reload FRR config)
+        working-directory: ansible
+        run: |
+          pip install --quiet ansible
+          ansible-galaxy collection install -r requirements.yml
+          ansible-playbook playbooks/site.yml --limit routers
+
+      - name: Ansible baseline is idempotent (second run reports no changes)
+        working-directory: ansible
+        run: |
+          out=$(ansible-playbook playbooks/site.yml --limit routers)
+          echo "${out}"
+          if echo "${out}" | grep -E "^(pe1|p1|p2|pe2)\s*:.*changed=[1-9]"; then
+            echo "::error::second ansible run reported changes"
+            exit 1
+          fi
+
+      - name: Controller build, test, and HTTP smoke
+        working-directory: controller
+        run: |
+          go build -o /tmp/controller ./cmd/controller
+          go test ./...
+          # No live gNMI target exists in this topology yet (stock FRR has
+          # none -- see controller/README.md), so this only smoke-tests
+          # that the binary starts and serves its HTTP endpoints, not a
+          # real Capabilities/Get/Subscribe against a device.
+          echo "targets: []" > /tmp/empty-devices.yaml
+          /tmp/controller -registry /tmp/empty-devices.yaml -listen :9400 &
+          echo $! > /tmp/controller.pid
+          sleep 2
+          curl -sf http://localhost:9400/healthz
+          curl -sf http://localhost:9400/metrics >/dev/null
+          kill "$(cat /tmp/controller.pid)"
+
+      - name: Traffic baseline (iperf3 UDP, client-a -> client-b)
+        run: sudo ./traffic/iperf/run-baseline.sh -p udp -t 15 -b 50M
+
+      - name: Upload traffic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: traffic-results
+          path: traffic/iperf/results/
+          if-no-files-found: ignore
+
+      - name: Failure test (disable pe1<->p1 core link)
+        run: |
+          start=$(date +%s)
+          sudo docker exec "clab-${CLAB_LAB_NAME}-p1" ip link set eth1 down
+          for _ in $(seq 1 30); do
+            sudo docker exec "clab-${CLAB_LAB_NAME}-client-a" ping -c1 -W1 198.51.100.2 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          end=$(date +%s)
+          echo "Reroute/recovery observed after $((end - start))s"
+          sudo docker exec "clab-${CLAB_LAB_NAME}-client-a" ping -c 5 -W2 198.51.100.2
+
+      - name: Restore link and verify full reconvergence
+        run: |
+          sudo docker exec "clab-${CLAB_LAB_NAME}-p1" ip link set eth1 up
+          for _ in $(seq 1 30); do
+            up=$(sudo docker exec "clab-${CLAB_LAB_NAME}-pe1" vtysh -c "show ip bgp summary json" \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for p in d.get('ipv4Unicast',{}).get('peers',{}).values() if p.get('state')=='Established'))" 2>/dev/null || echo 0)
+            [ "${up}" = "3" ] && exit 0
+            sleep 5
+          done
+          echo "::error::BGP did not reconverge after restoring the link"
+          exit 1
+
+      - name: Collect container logs
+        if: always()
+        run: |
+          mkdir -p /tmp/clab-logs
+          for n in pe1 p1 p2 pe2 client-a client-b; do
+            sudo docker logs "clab-${CLAB_LAB_NAME}-${n}" 2>&1 | tee "/tmp/clab-logs/${n}.log" >/dev/null || true
+          done
+
+      - name: Upload container logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clab-logs
+          path: /tmp/clab-logs/
+
+      - name: Destroy topology
+        if: always()
+        run: sudo containerlab destroy --topo topology/isp.clab.yml --cleanup
