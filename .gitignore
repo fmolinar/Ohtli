@@ -1,0 +1,56 @@
+# --- Terraform ---
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# --- Containerlab ---
+topology/clab-*/
+topology/**/.clab_dir/
+topology/**/ansible-inventory.yml
+*.clab.bak.yml
+
+# --- Ansible ---
+*.retry
+ansible/inventories/**/generated/
+
+# --- Go ---
+controller/bin/
+controller/**/*.test
+controller/**/*.out
+/bin/
+/dist/
+
+# --- Python (traffic/custom-agent tooling, if any) ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Traffic results / telemetry data (generated, not source) ---
+traffic/**/results/
+observability/**/data/
+
+# --- Secrets / local overrides ---
+*.env
+.env.*
+!*.env.example
+**/secrets/
+*.pem
+*.key
+!**/testdata/**/*.key
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
