@@ -1,0 +1,58 @@
+name: isp-lab
+
+# Matches the address plan in README.md section 3. Keep this subnet in sync
+# with any Terraform-provisioned management network.
+mgmt:
+  network: ohtli-mgmt
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  defaults:
+    kind: linux
+
+  nodes:
+    pe1:
+      image: frrouting/frr:9.1.0
+      binds:
+        - configs/pe1/daemons:/etc/frr/daemons
+        - configs/pe1/frr.conf:/etc/frr/frr.conf
+
+    p1:
+      image: frrouting/frr:9.1.0
+      binds:
+        - configs/p1/daemons:/etc/frr/daemons
+        - configs/p1/frr.conf:/etc/frr/frr.conf
+
+    p2:
+      image: frrouting/frr:9.1.0
+      binds:
+        - configs/p2/daemons:/etc/frr/daemons
+        - configs/p2/frr.conf:/etc/frr/frr.conf
+
+    pe2:
+      image: frrouting/frr:9.1.0
+      binds:
+        - configs/pe2/daemons:/etc/frr/daemons
+        - configs/pe2/frr.conf:/etc/frr/frr.conf
+
+    client-a:
+      image: networkstatic/iperf3:latest
+      entrypoint: sleep infinity
+      exec:
+        - ip address add 192.0.2.2/24 dev eth1
+        - ip route add default via 192.0.2.1
+
+    client-b:
+      image: networkstatic/iperf3:latest
+      entrypoint: sleep infinity
+      exec:
+        - ip address add 198.51.100.2/24 dev eth1
+        - ip route add default via 198.51.100.1
+
+  links:
+    - endpoints: ["pe1:eth1", "p1:eth1"]
+    - endpoints: ["pe1:eth2", "p2:eth1"]
+    - endpoints: ["p1:eth2", "pe2:eth1"]
+    - endpoints: ["p2:eth2", "pe2:eth2"]
+    - endpoints: ["client-a:eth1", "pe1:eth3"]
+    - endpoints: ["client-b:eth1", "pe2:eth3"]
