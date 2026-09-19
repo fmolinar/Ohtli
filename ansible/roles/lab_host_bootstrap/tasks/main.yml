@@ -1,0 +1,64 @@
+---
+# Installs Docker and Containerlab on the Terraform-provisioned lab VM,
+# through pinned automation (README.md Phase 1 exit criterion).
+
+- name: Install Docker prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Download Docker's GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else ansible_facts['architecture'] }}
+      signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu
+      {{ ansible_facts['distribution_release'] }} stable
+    filename: docker
+    state: present
+
+- name: Install Docker Engine (pinned)
+  ansible.builtin.apt:
+    name:
+      - "docker-ce={{ lab_host_bootstrap_docker_package_version }}"
+      - "docker-ce-cli={{ lab_host_bootstrap_docker_package_version }}"
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Ensure Docker service is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Add automation user to the docker group
+  ansible.builtin.user:
+    name: "{{ common_automation_user }}"
+    groups: docker
+    append: true
+
+- name: Install Containerlab (pinned version)
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -sL https://get.containerlab.dev | bash -s -- -v {{ lab_host_bootstrap_containerlab_version }}
+  args:
+    creates: /usr/bin/containerlab
+    executable: /bin/bash

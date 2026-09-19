@@ -1,0 +1,20 @@
+---
+- name: Ensure Containerlab bind-mount directory exists for this node
+  ansible.builtin.file:
+    path: "{{ frr_config_dest_root }}/{{ inventory_hostname }}"
+    state: directory
+    mode: "0755"
+
+- name: Render FRR daemons file
+  ansible.builtin.template:
+    src: daemons.j2
+    dest: "{{ frr_config_dest_root }}/{{ inventory_hostname }}/daemons"
+    mode: "0644"
+  notify: Reload frr config
+
+- name: Render FRR configuration
+  ansible.builtin.template:
+    src: frr.conf.j2
+    dest: "{{ frr_config_dest_root }}/{{ inventory_hostname }}/frr.conf"
+    mode: "0644"
+  notify: Reload frr config

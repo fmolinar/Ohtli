@@ -1,0 +1,8 @@
+# {{ ansible_managed | default('Managed by Ansible: ansible/roles/common.') }}
+{% for server in common_ntp_servers %}
+pool {{ server }} iburst
+{% endfor %}
+
+driftfile /var/lib/chrony/chrony.drift
+rtcsync
+makestep 1.0 3

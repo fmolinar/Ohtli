@@ -1,0 +1,10 @@
+---
+bgp_as: 65000
+ospf_area: "0"
+frr_version: "9.1"
+
+# Where Containerlab expects bind-mounted per-node config; see
+# topology/isp.clab.yml. Path is relative to the playbook run directory
+# (ansible/), matching the `ansible-playbook` invocation documented in
+# ansible/README.md.
+frr_config_dest_root: "../topology/configs"

@@ -1,0 +1,3 @@
+# {{ ansible_managed | default('Managed by Ansible: ansible/roles/common.') }}
+[Resolve]
+DNS={{ common_dns_nameservers | join(' ') }}

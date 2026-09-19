@@ -1,0 +1,53 @@
+! {{ ansible_managed | default('Managed by Ansible: ansible/roles/frr_baseline. Do not edit by hand.') }}
+frr version {{ frr_version }}
+frr defaults traditional
+hostname {{ inventory_hostname }}
+log stdout
+no ipv6 forwarding
+!
+interface lo
+ ip address {{ loopback_address }}
+!
+{% for iface in interfaces %}
+interface {{ iface.name }}
+ description {{ iface.description }}
+ ip address {{ iface.address }}
+!
+{% endfor %}
+{% if client_subnet %}
+ip prefix-list CLIENT-{{ inventory_hostname | upper }} seq 5 permit {{ client_subnet }}
+!
+route-map RM-CLIENT permit 10
+ match ip address prefix-list CLIENT-{{ inventory_hostname | upper }}
+!
+{% endif %}
+router ospf
+ ospf router-id {{ router_id }}
+ network {{ loopback_address }} area {{ ospf_area }}
+{% for iface in interfaces if iface.ospf %}
+ network {{ iface.address }} area {{ ospf_area }}
+{% endfor %}
+ passive-interface lo
+!
+router bgp {{ bgp_as }}
+ bgp router-id {{ router_id }}
+ no bgp ebgp-requires-policy
+ neighbor PROVIDER peer-group
+ neighbor PROVIDER remote-as {{ bgp_as }}
+ neighbor PROVIDER update-source lo
+ neighbor PROVIDER next-hop-self
+{% for neighbor in bgp_neighbors %}
+ neighbor {{ neighbor }} peer-group PROVIDER
+{% endfor %}
+ !
+ address-family ipv4 unicast
+{% if client_subnet %}
+  redistribute connected route-map RM-CLIENT
+{% endif %}
+{% for neighbor in bgp_neighbors %}
+  neighbor {{ neighbor }} activate
+{% endfor %}
+ exit-address-family
+!
+line vty
+!
