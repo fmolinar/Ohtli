@@ -9,7 +9,7 @@ client-a -- pe1 -- p1 -- pe2 -- client-b
               \-------- p2 ------/
 ```
 
-- `pe1`, `p1`, `p2`, `pe2` run [FRRouting](https://frrouting.org/) (`frrouting/frr:9.1.0`),
+- `pe1`, `p1`, `p2`, `pe2` run [FRRouting](https://frrouting.org/) (`frrouting/frr:v8.4.1`),
   configured via bind-mounted `daemons` and `frr.conf` files under `configs/<node>/`.
 - `client-a`, `client-b` run `networkstatic/iperf3`, with IP addressing and a
   default route applied post-deploy via the `exec:` block in `isp.clab.yml`
@@ -86,5 +86,5 @@ containerlab destroy --topo topology/isp.clab.yml --cleanup
   live `containerlab deploy` has **not** been run against it yet — validate
   in CI or on your lab host before relying on it (tracked as a CI job in
   `feat/ci-cd-pipeline`).
-- FRR version is pinned (`9.1.0`); bump deliberately and re-verify `vtysh`
+- FRR version is pinned (`v8.4.1`); bump deliberately and re-verify `vtysh`
   config compatibility.
