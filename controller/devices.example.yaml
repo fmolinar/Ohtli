@@ -1,0 +1,26 @@
+# Copy to devices.yaml (gitignored) and point it at real gNMI targets.
+#
+# Nothing in topology/isp.clab.yml exposes gNMI yet -- stock FRR has no
+# OpenConfig gNMI target (see topology/README.md and ansible/README.md).
+# This registry becomes real once an SR Linux node or a gNMI/OpenConfig
+# translator is introduced (README.md section 4).
+
+default_paths:
+  - /interfaces/interface/state/oper-status
+  - /interfaces/interface/state/counters
+  - /network-instances/network-instance/protocols
+  - /components/component/state
+
+targets:
+  - name: pe1
+    address: 172.20.20.11:9339
+    tls:
+      # Lab-only. Production targets must present a certificate this
+      # controller can verify -- set ca_file (and cert_file/key_file for
+      # mTLS) instead of insecure/insecure_skip_verify.
+      insecure: true
+
+  - name: pe2
+    address: 172.20.20.12:9339
+    tls:
+      insecure: true

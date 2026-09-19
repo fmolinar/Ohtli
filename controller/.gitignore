@@ -1,0 +1,5 @@
+bin/
+*.test
+*.out
+devices.yaml
+!devices.example.yaml
