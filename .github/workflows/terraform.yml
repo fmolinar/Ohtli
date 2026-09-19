@@ -34,16 +34,16 @@ concurrency:
   group: terraform-lab
   cancel-in-progress: false
 
-defaults:
-  run:
-    working-directory: terraform/environments/lab
-
 jobs:
   has-credentials:
     runs-on: ubuntu-latest
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
+      # No checkout here -- this job only inspects secrets, so it must not
+      # inherit a working-directory that assumes the repo is checked out
+      # (that broke this job the first time: bash couldn't even start in
+      # a directory that doesn't exist yet).
       - id: check
         run: |
           if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
@@ -61,6 +61,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    defaults:
+      run:
+        working-directory: terraform/environments/lab
     steps:
       - uses: actions/checkout@v4
 
@@ -94,6 +97,9 @@ jobs:
     # Settings -> Environments -> lab-infra so apply/destroy need manual
     # approval, per README.md section 10.
     environment: lab-infra
+    defaults:
+      run:
+        working-directory: terraform/environments/lab
     steps:
       - uses: actions/checkout@v4
 
