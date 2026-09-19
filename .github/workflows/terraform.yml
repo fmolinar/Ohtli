@@ -1,0 +1,136 @@
+name: Terraform lab host
+
+# README.md section 10: terraform-plan is a reviewable artifact on every
+# PR touching terraform/; terraform-apply only runs on manual dispatch,
+# gated by the `lab-infra` GitHub Environment's required reviewers (see
+# terraform/environments/lab/README.md and this repo's Settings ->
+# Environments -- that protection is configured in the GitHub UI, not in
+# this file).
+#
+# Needs repository secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+# TF_VAR_ssh_public_key, TF_VAR_ssh_allowed_cidrs. Jobs no-op (rather than
+# fail) when they're absent, so this workflow is safe to merge before
+# those secrets are configured.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action to run"
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+concurrency:
+  group: terraform-lab
+  cancel-in-progress: false
+
+jobs:
+  has-credentials:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      # No checkout here -- this job only inspects secrets, so it must not
+      # inherit a working-directory that assumes the repo is checked out
+      # (that broke this job the first time: bash couldn't even start in
+      # a directory that doesn't exist yet).
+      - id: check
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AWS_ACCESS_KEY_ID is not set; skipping plan/apply. See terraform/environments/lab/README.md."
+          fi
+
+  plan:
+    name: terraform-plan
+    needs: has-credentials
+    if: needs.has-credentials.outputs.configured == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: terraform/environments/lab
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - run: terraform init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - run: terraform plan -no-color -out=tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.TF_VAR_ssh_public_key }}
+          TF_VAR_ssh_allowed_cidrs: ${{ secrets.TF_VAR_ssh_allowed_cidrs }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/environments/lab/tfplan
+
+  apply:
+    name: terraform-apply
+    needs: has-credentials
+    if: needs.has-credentials.outputs.configured == 'true' && github.event_name == 'workflow_dispatch' && inputs.action != 'plan'
+    runs-on: ubuntu-latest
+    # Configure this environment's required reviewers in
+    # Settings -> Environments -> lab-infra so apply/destroy need manual
+    # approval, per README.md section 10.
+    environment: lab-infra
+    defaults:
+      run:
+        working-directory: terraform/environments/lab
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run without a remote backend
+        run: |
+          if ! grep -q 'backend "' versions.tf; then
+            echo "::error::versions.tf has no backend block, meaning Terraform state would only exist on this ephemeral runner and be lost the moment this job ends -- any infrastructure created would be orphaned (unmanaged, still billed, and 'terraform destroy' wouldn't know it exists). Configure a remote backend (S3 + DynamoDB lock table, or Terraform Cloud) in versions.tf before running apply/destroy from CI. See terraform/environments/lab/README.md."
+            exit 1
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - run: terraform init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - if: inputs.action == 'apply'
+        run: terraform apply -auto-approve -no-color
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.TF_VAR_ssh_public_key }}
+          TF_VAR_ssh_allowed_cidrs: ${{ secrets.TF_VAR_ssh_allowed_cidrs }}
+
+      - if: inputs.action == 'destroy'
+        run: terraform destroy -auto-approve -no-color
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.TF_VAR_ssh_public_key }}
+          TF_VAR_ssh_allowed_cidrs: ${{ secrets.TF_VAR_ssh_allowed_cidrs }}
