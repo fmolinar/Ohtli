@@ -1,7 +1,7 @@
 ---
 bgp_as: 65000
 ospf_area: "0"
-frr_version: "9.1"
+frr_version: "8.4"
 
 # Where Containerlab expects bind-mounted per-node config; see
 # topology/isp.clab.yml. Path is relative to the playbook run directory
