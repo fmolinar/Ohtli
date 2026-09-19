@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values.
+# Never commit terraform.tfvars -- it's excluded by the repo .gitignore.
+
+aws_region = "us-east-1"
+
+# `ssh-keygen -t ed25519 -f ohtli-lab -C ohtli-lab` then paste the .pub contents:
+ssh_public_key = "ssh-ed25519 AAAA... ohtli-lab"
+
+# Restrict to your own IP(s), e.g. ["203.0.113.4/32"]. Do not use 0.0.0.0/0.
+ssh_allowed_cidrs = ["203.0.113.4/32"]
