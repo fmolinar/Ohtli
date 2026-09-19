@@ -1,0 +1,13 @@
+---
+# Bind-mounted config only takes effect on the running FRR container after a
+# reload. frr-reload.py (shipped in the frrouting/frr image) applies the diff
+# without a full container restart. This assumes Containerlab is running on
+# the same host as the ansible-playbook invocation -- true for the single
+# lab-host model in README.md section 5.
+- name: Reload frr config
+  ansible.builtin.command:
+    cmd: >-
+      docker exec clab-{{ clab_lab_name | default('isp-lab') }}-{{ inventory_hostname }}
+      /usr/lib/frr/frr-reload.py --reload /etc/frr/frr.conf
+  changed_when: true
+  when: reload_frr | default(true) | bool

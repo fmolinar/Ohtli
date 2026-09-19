@@ -1,0 +1,3 @@
+---
+lab_host_bootstrap_docker_package_version: "5:27.3.1-1~ubuntu.{{ ansible_facts['distribution_version'] }}~{{ ansible_facts['distribution_release'] }}"
+lab_host_bootstrap_containerlab_version: "0.58.0"

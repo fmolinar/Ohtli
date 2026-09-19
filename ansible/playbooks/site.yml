@@ -1,0 +1,13 @@
+---
+- name: Baseline the lab host
+  hosts: lab_host
+  become: true
+  roles:
+    - common
+    - lab_host_bootstrap
+
+- name: Baseline the FRR routers
+  hosts: routers
+  become: false  # connection: local, no privilege needed to write into the repo
+  roles:
+    - frr_baseline

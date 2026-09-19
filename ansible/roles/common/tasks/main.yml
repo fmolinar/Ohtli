@@ -1,0 +1,73 @@
+---
+# Baseline for the Terraform-provisioned lab VM (README.md section 6):
+# hostname, an automation user, SSH, NTP, and DNS. Network-node baseline
+# (addressing, OSPF/BGP) lives in roles/frr_baseline instead.
+
+- name: Set system timezone
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+
+- name: Install NTP/DNS prerequisites
+  ansible.builtin.apt:
+    name:
+      - chrony
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Configure chrony NTP servers
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    mode: "0644"
+  notify: Restart chrony
+
+- name: Ensure chrony is enabled and running
+  ansible.builtin.systemd:
+    name: chrony
+    enabled: true
+    state: started
+
+- name: Ensure /etc/systemd/resolved.conf.d exists
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Set DNS nameservers (systemd-resolved)
+  ansible.builtin.template:
+    src: resolved.conf.j2
+    dest: /etc/systemd/resolved.conf.d/60-ohtli-dns.conf
+    mode: "0644"
+  notify: Restart systemd-resolved
+
+- name: Create automation user
+  ansible.builtin.user:
+    name: "{{ common_automation_user }}"
+    groups: sudo
+    shell: /bin/bash
+    append: true
+    create_home: true
+
+- name: Allow automation user passwordless sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-{{ common_automation_user }}"
+    content: "{{ common_automation_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: Install automation user's SSH public key
+  ansible.posix.authorized_key:
+    user: "{{ common_automation_user }}"
+    key: "{{ common_automation_user_ssh_public_key }}"
+    state: present
+  when: common_automation_user_ssh_public_key | length > 0
+
+- name: Disable SSH password authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    validate: "sshd -t -f %s"
+  notify: Restart sshd
